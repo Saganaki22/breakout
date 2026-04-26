@@ -712,17 +712,27 @@ pauseTitle.alpha = 0;
 pauseSub.alpha = 0;
 uiLayer.addChild(toastBox, toastTitle, toastHint, pauseScrim, pauseTitle, pauseSub);
 
-const atlasAbs = abs(atlasUrl);
-const bgAbsMap = Object.fromEntries(
-  Object.entries(backgroundUrls).map(([k, u]) => [k, abs(u)])
-);
-await Assets.load([atlasAbs, ...Object.values(bgAbsMap)]);
+function loadImg(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load ${url}`));
+    img.src = url;
+  });
+}
 
-const atlasTexture = Texture.from(atlasAbs);
+const atlasAbs = abs(atlasUrl);
+const bgAbsEntries = Object.entries(backgroundUrls).map(([k, u]) => [k, abs(u)] as const);
+
+loadingHint.textContent = "Loading atlas\u2026";
+const atlasTexture = Texture.from(await loadImg(atlasAbs));
+
 const backgroundTextures = new Map<string, Texture>();
-Object.entries(bgAbsMap).forEach(([key, url]) => {
-  backgroundTextures.set(key, Texture.from(url));
-});
+for (const [key, url] of bgAbsEntries) {
+  loadingHint.textContent = `Loading ${key}\u2026`;
+  backgroundTextures.set(key, Texture.from(await loadImg(url)));
+}
 
 const spriteTextures = createAtlasTextures(atlasTexture);
 const bricks: Brick[] = [];
