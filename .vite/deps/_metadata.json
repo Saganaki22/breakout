@@ -1,0 +1,88 @@
+{
+  "hash": "81de7c10",
+  "configHash": "2a7d4186",
+  "lockfileHash": "b51b35e3",
+  "browserHash": "408e3c54",
+  "optimized": {
+    "pixi.js": {
+      "src": "../../node_modules/pixi.js/lib/index.mjs",
+      "file": "pixi__js.js",
+      "fileHash": "62ba6dfb",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "browserAll-5D4CGHTB": {
+      "file": "browserAll-5D4CGHTB.js"
+    },
+    "chunk-I2WSHTFU": {
+      "file": "chunk-I2WSHTFU.js"
+    },
+    "webworkerAll-ERHHNEHA": {
+      "file": "webworkerAll-ERHHNEHA.js"
+    },
+    "chunk-CRPP7B4P": {
+      "file": "chunk-CRPP7B4P.js"
+    },
+    "chunk-Q4QN7IS3": {
+      "file": "chunk-Q4QN7IS3.js"
+    },
+    "WebGPURenderer-6GFKFW3Y": {
+      "file": "WebGPURenderer-6GFKFW3Y.js"
+    },
+    "chunk-QBFAJ23V": {
+      "file": "chunk-QBFAJ23V.js"
+    },
+    "WebGLRenderer-UQ5EWAQX": {
+      "file": "WebGLRenderer-UQ5EWAQX.js"
+    },
+    "chunk-QTL4JA7D": {
+      "file": "chunk-QTL4JA7D.js"
+    },
+    "chunk-PKCH6BQW": {
+      "file": "chunk-PKCH6BQW.js"
+    },
+    "CanvasRenderer-REB7BXFF": {
+      "file": "CanvasRenderer-REB7BXFF.js"
+    },
+    "chunk-OUA4PISF": {
+      "file": "chunk-OUA4PISF.js"
+    },
+    "chunk-W3PHOAVR": {
+      "file": "chunk-W3PHOAVR.js"
+    },
+    "chunk-MFXQKGMQ": {
+      "file": "chunk-MFXQKGMQ.js"
+    },
+    "chunk-E5BN425C": {
+      "file": "chunk-E5BN425C.js"
+    },
+    "BitmapFont-N7W7H7ZC": {
+      "file": "BitmapFont-N7W7H7ZC.js"
+    },
+    "chunk-MRP3HWXZ": {
+      "file": "chunk-MRP3HWXZ.js"
+    },
+    "chunk-EFUTS62J": {
+      "file": "chunk-EFUTS62J.js"
+    },
+    "chunk-S3OCQR2J": {
+      "file": "chunk-S3OCQR2J.js"
+    },
+    "chunk-PE36JTFI": {
+      "file": "chunk-PE36JTFI.js"
+    },
+    "chunk-DSUQR63W": {
+      "file": "chunk-DSUQR63W.js"
+    },
+    "chunk-PBDPKMM5": {
+      "file": "chunk-PBDPKMM5.js"
+    },
+    "chunk-6FDIAFE2": {
+      "file": "chunk-6FDIAFE2.js"
+    },
+    "chunk-UFGTUJO7": {
+      "file": "chunk-UFGTUJO7.js"
+    }
+  }
+}

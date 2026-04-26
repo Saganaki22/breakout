@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "Bash(gh api:*)",
+      "Bash(where gh:*)",
+      "mcp__web-reader__webReader",
+      "Bash(npm run:*)",
+      "Bash(curl -sI \"https://saganaki22.github.io/breakout/assets/bg-volcano-Ci5qZIA3.png\")",
+      "Bash(curl -sI \"https://drbaph.is-a.dev/breakout/\")",
+      "Bash(curl -sI \"https://drbaph.is-a.dev/breakout/assets/bg-volcano-Ci5qZIA3.png\")",
+      "Bash(curl -sI \"https://drbaph.is-a.dev/breakout/assets/index-ChZi6G65.js\")",
+      "Bash(curl -sI \"https://drbaph.is-a.dev/breakout/assets/neon-breakout-vector-gBJXhHDX.svg\")"
+    ]
+  }
+}
