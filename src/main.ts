@@ -603,9 +603,11 @@ const paddle = {
   sprite: null as Sprite | null
 };
 
-startBtn.addEventListener("click", startGame);
-pauseBtn.addEventListener("click", togglePause);
-launchBtn.addEventListener("click", launch);
+startBtn.hidden = true;
+const loadingHint = document.createElement("p");
+loadingHint.textContent = "Loading assets\u2026";
+loadingHint.style.cssText = "margin:0;color:#aeb9cc;font-size:17px;";
+(overlay.querySelector("p")?.parentElement || overlay).appendChild(loadingHint);
 
 const app = new Application();
 await app.init({
@@ -734,6 +736,9 @@ resizeRenderer();
 resetLevel(false);
 updateHud();
 requestAnimationFrame(() => resizeRenderer());
+
+loadingHint.remove();
+startBtn.hidden = false;
 
 let accumulator = 0;
 app.ticker.add((ticker) => {
@@ -4989,6 +4994,10 @@ muteBtn.addEventListener("click", () => {
   state.muted = !state.muted;
   muteBtn.textContent = state.muted ? "Sound Off" : "Sound On";
 });
+
+startBtn.addEventListener("click", startGame);
+pauseBtn.addEventListener("click", togglePause);
+launchBtn.addEventListener("click", launch);
 
 declare global {
   interface Window {
