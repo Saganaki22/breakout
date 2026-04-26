@@ -499,7 +499,7 @@ const startBtn = document.getElementById("startBtn") as HTMLButtonElement;
 const pauseBtn = document.getElementById("pauseBtn") as HTMLButtonElement;
 const launchBtn = document.getElementById("launchBtn") as HTMLButtonElement;
 const muteBtn = document.getElementById("muteBtn") as HTMLButtonElement;
-const canvas = document.getElementById("game") as HTMLCanvasElement;
+let canvas = document.getElementById("game") as HTMLCanvasElement;
 
 const state = {
   running: false,
@@ -620,15 +620,16 @@ const abs = (u: string) => new URL(u, window.location.href).href;
 loadingHint.textContent = "Creating renderer\u2026";
 const app = new Application();
 await app.init({
-  canvas,
   width: WORLD_W,
   height: WORLD_H,
   backgroundAlpha: 0,
-  antialias: true,
-  autoDensity: false,
-  resolution: 1
+  antialias: true
 });
 loadingHint.textContent = "Renderer OK\u2026";
+
+const oldCanvas = canvas;
+canvas = app.canvas as HTMLCanvasElement;
+oldCanvas.replaceWith(canvas);
 
 const root = new Container();
 const bgLayer = new Container();
