@@ -617,6 +617,7 @@ window.addEventListener("unhandledrejection", (e) => {
 
 const abs = (u: string) => new URL(u, window.location.href).href;
 
+loadingHint.textContent = "Creating renderer\u2026";
 const app = new Application();
 await app.init({
   canvas,
@@ -625,9 +626,9 @@ await app.init({
   backgroundAlpha: 0,
   antialias: true,
   autoDensity: true,
-  resolution: Math.min(window.devicePixelRatio || 1, 2),
-  preference: "webgl"
+  resolution: Math.min(window.devicePixelRatio || 1, 2)
 });
+loadingHint.textContent = "Renderer OK\u2026";
 
 const root = new Container();
 const bgLayer = new Container();
