@@ -609,6 +609,14 @@ loadingHint.textContent = "Loading assets\u2026";
 loadingHint.style.cssText = "margin:0;color:#aeb9cc;font-size:17px;";
 (overlay.querySelector("p")?.parentElement || overlay).appendChild(loadingHint);
 
+window.addEventListener("unhandledrejection", (e) => {
+  loadingHint.textContent = `Error: ${e.reason}`;
+  loadingHint.style.color = "#ff4f78";
+  console.error("Unhandled rejection:", e.reason);
+});
+
+const abs = (u: string) => new URL(u, window.location.href).href;
+
 const app = new Application();
 await app.init({
   canvas,
@@ -704,15 +712,15 @@ pauseTitle.alpha = 0;
 pauseSub.alpha = 0;
 uiLayer.addChild(toastBox, toastTitle, toastHint, pauseScrim, pauseTitle, pauseSub);
 
-const assetUrls = [
-  atlasUrl,
-  ...Object.values(backgroundUrls)
-] as const;
-await Assets.load([...assetUrls]);
+const atlasAbs = abs(atlasUrl);
+const bgAbsMap = Object.fromEntries(
+  Object.entries(backgroundUrls).map(([k, u]) => [k, abs(u)])
+);
+await Assets.load([atlasAbs, ...Object.values(bgAbsMap)]);
 
-const atlasTexture = Texture.from(atlasUrl);
+const atlasTexture = Texture.from(atlasAbs);
 const backgroundTextures = new Map<string, Texture>();
-Object.entries(backgroundUrls).forEach(([key, url]) => {
+Object.entries(bgAbsMap).forEach(([key, url]) => {
   backgroundTextures.set(key, Texture.from(url));
 });
 
