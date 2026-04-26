@@ -603,6 +603,10 @@ const paddle = {
   sprite: null as Sprite | null
 };
 
+startBtn.addEventListener("click", startGame);
+pauseBtn.addEventListener("click", togglePause);
+launchBtn.addEventListener("click", launch);
+
 const app = new Application();
 await app.init({
   canvas,
@@ -4981,9 +4985,6 @@ window.addEventListener("resize", () => {
   resizeRenderer();
 });
 
-startBtn.addEventListener("click", startGame);
-pauseBtn.addEventListener("click", togglePause);
-launchBtn.addEventListener("click", launch);
 muteBtn.addEventListener("click", () => {
   state.muted = !state.muted;
   muteBtn.textContent = state.muted ? "Sound Off" : "Sound On";
