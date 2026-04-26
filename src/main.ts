@@ -619,12 +619,42 @@ const abs = (u: string) => new URL(u, window.location.href).href;
 
 loadingHint.textContent = "Creating renderer\u2026";
 const app = new Application();
-await app.init({
-  width: WORLD_W,
-  height: WORLD_H,
-  backgroundAlpha: 0,
-  antialias: true
-});
+
+const initTimeout = new Promise<never>((_, rej) =>
+  setTimeout(() => rej(new Error("Renderer init timed out after 5s")), 5000)
+);
+
+try {
+  await Promise.race([
+    app.init({
+      width: WORLD_W,
+      height: WORLD_H,
+      backgroundAlpha: 0,
+      antialias: true,
+      preference: "webgl"
+    }),
+    initTimeout
+  ]);
+} catch {
+  loadingHint.textContent = "WebGL failed, trying canvas renderer\u2026";
+  try {
+    await Promise.race([
+      app.init({
+        width: WORLD_W,
+        height: WORLD_H,
+        backgroundAlpha: 0,
+        preference: "canvas"
+      }),
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("Canvas renderer also timed out")), 15000)
+      )
+    ]);
+  } catch (e2) {
+    loadingHint.textContent = `All renderers failed: ${e2}`;
+    loadingHint.style.color = "#ff4f78";
+    throw e2;
+  }
+}
 loadingHint.textContent = "Renderer OK\u2026";
 
 const oldCanvas = canvas;
