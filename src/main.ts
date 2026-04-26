@@ -625,8 +625,8 @@ await app.init({
   height: WORLD_H,
   backgroundAlpha: 0,
   antialias: true,
-  autoDensity: true,
-  resolution: Math.min(window.devicePixelRatio || 1, 2)
+  autoDensity: false,
+  resolution: 1
 });
 loadingHint.textContent = "Renderer OK\u2026";
 
