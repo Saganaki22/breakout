@@ -708,12 +708,12 @@ const assetUrls = [
   atlasUrl,
   ...Object.values(backgroundUrls)
 ] as const;
-const loadedTextures = await Assets.load<Texture>([...assetUrls]);
+await Assets.load([...assetUrls]);
 
-const atlasTexture = loadedTextures[atlasUrl];
+const atlasTexture = Texture.from(atlasUrl);
 const backgroundTextures = new Map<string, Texture>();
 Object.entries(backgroundUrls).forEach(([key, url]) => {
-  backgroundTextures.set(key, loadedTextures[url]);
+  backgroundTextures.set(key, Texture.from(url));
 });
 
 const spriteTextures = createAtlasTextures(atlasTexture);
