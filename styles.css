@@ -66,6 +66,12 @@ button:focus-visible {
   transform: translateY(-1px);
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+  transform: none;
+}
+
 .game-shell {
   position: relative;
   z-index: 1;

@@ -6,8 +6,11 @@ import {
   Rectangle,
   Sprite,
   Text,
-  Texture
+  Texture,
+  WebGLRenderer,
+  CanvasRenderer
 } from "pixi.js";
+import "pixi.js/browser";
 
 import atlasUrl from "../assets/neon-breakout-vector.svg?url";
 import bgClockworkUrl from "../assets/bg-clockwork.png?url";
@@ -30,6 +33,8 @@ const MAX_PARTICLES = 200;
 const MAX_SHOCK_RINGS = 40;
 const MAX_FLOAT_TEXTS = 24;
 const CHOMPER_MIN_DISTANCE = 520;
+const CHOMPER_PADDLE_BITE_DURATION = 25;
+const CHOMPER_PADDLE_SHRINK_FACTOR = 0.75;
 
 type BrickType = "cyan" | "magenta" | "amber" | "green" | "steel" | "bomb";
 type BallKind = "green" | "yellow" | "red" | "bomb";
@@ -500,6 +505,13 @@ const pauseBtn = document.getElementById("pauseBtn") as HTMLButtonElement;
 const launchBtn = document.getElementById("launchBtn") as HTMLButtonElement;
 const muteBtn = document.getElementById("muteBtn") as HTMLButtonElement;
 let canvas = document.getElementById("game") as HTMLCanvasElement;
+let gameReady = false;
+
+startBtn.disabled = true;
+startBtn.textContent = "Loading";
+startBtn.addEventListener("click", () => {
+  if (gameReady) startGame();
+});
 
 const state = {
   running: false,
@@ -599,63 +611,78 @@ const paddle = {
   shrink: 0,
   widenStacks: 0,
   shrinkStacks: 0,
+  chomperBites: [] as number[],
   cooldown: 0,
   sprite: null as Sprite | null
 };
 
-startBtn.hidden = true;
-const loadingHint = document.createElement("p");
-loadingHint.textContent = "Loading assets\u2026";
-loadingHint.style.cssText = "margin:0;color:#aeb9cc;font-size:17px;";
-(overlay.querySelector("p")?.parentElement || overlay).appendChild(loadingHint);
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
-window.addEventListener("unhandledrejection", (e) => {
-  loadingHint.textContent = `Error: ${e.reason}`;
-  loadingHint.style.color = "#ff4f78";
-  console.error("Unhandled rejection:", e.reason);
-});
+async function createRendererApp(): Promise<Application> {
+  const attempts: Array<{
+    name: string;
+    Renderer: typeof WebGLRenderer | typeof CanvasRenderer;
+    antialias: boolean;
+    timeout: number;
+  }> = [
+    { name: "WebGL", Renderer: WebGLRenderer, antialias: true, timeout: 10000 },
+    { name: "Canvas", Renderer: CanvasRenderer, antialias: false, timeout: 20000 }
+  ];
+  let lastError: unknown;
 
-const abs = (u: string) => new URL(u, window.location.href).href;
-
-loadingHint.textContent = "Creating renderer\u2026";
-const app = new Application();
-
-const initTimeout = new Promise<never>((_, rej) =>
-  setTimeout(() => rej(new Error("Renderer init timed out after 5s")), 5000)
-);
-
-try {
-  await Promise.race([
-    app.init({
+  for (const attempt of attempts) {
+    startBtn.textContent = attempt.name;
+    const candidate = new Application();
+    const renderer = new attempt.Renderer();
+    const options = {
       width: WORLD_W,
       height: WORLD_H,
       backgroundAlpha: 0,
-      antialias: true,
-      preference: "webgl"
-    }),
-    initTimeout
-  ]);
-} catch {
-  loadingHint.textContent = "WebGL failed, trying canvas renderer\u2026";
-  try {
-    await Promise.race([
-      app.init({
-        width: WORLD_W,
-        height: WORLD_H,
-        backgroundAlpha: 0,
-        preference: "canvas"
-      }),
-      new Promise<never>((_, rej) =>
-        setTimeout(() => rej(new Error("Canvas renderer also timed out")), 15000)
-      )
-    ]);
-  } catch (e2) {
-    loadingHint.textContent = `All renderers failed: ${e2}`;
-    loadingHint.style.color = "#ff4f78";
-    throw e2;
+      antialias: attempt.antialias,
+      autoDensity: true,
+      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      manageImports: false
+    };
+
+    try {
+      await withTimeout(renderer.init(options), attempt.timeout, `${attempt.name} renderer timed out`);
+      (candidate as unknown as { renderer: typeof renderer }).renderer = renderer;
+      for (const plugin of (Application as unknown as { _plugins: Array<{ init(this: Application, options: unknown): void }> })._plugins) {
+        plugin.init.call(candidate, options);
+      }
+      return candidate;
+    } catch (error) {
+      lastError = error;
+      console.error(`${attempt.name} renderer failed:`, error);
+      try {
+        candidate.destroy(true, true);
+      } catch {
+        // The renderer may not exist yet when an init attempt times out.
+      }
+    }
   }
+
+  throw lastError ?? new Error("No renderer could be created");
 }
-loadingHint.textContent = "Renderer OK\u2026";
+
+const app = await createRendererApp().catch((error) => {
+  startBtn.textContent = "Renderer failed";
+  throw error;
+});
 
 const oldCanvas = canvas;
 canvas = app.canvas as HTMLCanvasElement;
@@ -744,27 +771,18 @@ pauseTitle.alpha = 0;
 pauseSub.alpha = 0;
 uiLayer.addChild(toastBox, toastTitle, toastHint, pauseScrim, pauseTitle, pauseSub);
 
-function loadImg(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`Failed to load ${url}`));
-    img.src = url;
-  });
-}
+const assetUrls = [
+  atlasUrl,
+  ...Object.values(backgroundUrls)
+] as const;
+startBtn.textContent = "Assets";
+const loadedTextures = await Assets.load<Texture>([...assetUrls]);
 
-const atlasAbs = abs(atlasUrl);
-const bgAbsEntries = Object.entries(backgroundUrls).map(([k, u]) => [k, abs(u)] as const);
-
-loadingHint.textContent = "Loading atlas\u2026";
-const atlasTexture = Texture.from(await loadImg(atlasAbs));
-
+const atlasTexture = loadedTextures[atlasUrl];
 const backgroundTextures = new Map<string, Texture>();
-for (const [key, url] of bgAbsEntries) {
-  loadingHint.textContent = `Loading ${key}\u2026`;
-  backgroundTextures.set(key, Texture.from(await loadImg(url)));
-}
+Object.entries(backgroundUrls).forEach(([key, url]) => {
+  backgroundTextures.set(key, loadedTextures[url]);
+});
 
 const spriteTextures = createAtlasTextures(atlasTexture);
 const bricks: Brick[] = [];
@@ -786,9 +804,9 @@ resizeRenderer();
 resetLevel(false);
 updateHud();
 requestAnimationFrame(() => resizeRenderer());
-
-loadingHint.remove();
-startBtn.hidden = false;
+gameReady = true;
+startBtn.disabled = false;
+startBtn.textContent = "Start";
 
 let accumulator = 0;
 app.ticker.add((ticker) => {
@@ -893,6 +911,7 @@ function resetLevel(autoLaunch: boolean, keepBalls = false): void {
     paddle.shrink = 0;
     paddle.widenStacks = 0;
     paddle.shrinkStacks = 0;
+    paddle.chomperBites.length = 0;
     state.pointerX = paddle.x;
   }
   paddle.cooldown = 0;
@@ -1983,6 +2002,10 @@ function movePaddle(dt: number): void {
   paddle.speed *= Math.pow(0.025, dt);
   paddle.widen = Math.max(0, paddle.widen - dt);
   paddle.shrink = Math.max(0, paddle.shrink - dt);
+  for (let i = paddle.chomperBites.length - 1; i >= 0; i -= 1) {
+    paddle.chomperBites[i] -= dt;
+    if (paddle.chomperBites[i] <= 0) paddle.chomperBites.splice(i, 1);
+  }
   if (paddle.widen <= 0) paddle.widenStacks = 0;
   if (paddle.shrink <= 0) paddle.shrinkStacks = 0;
   const assistWidth = lowBallAssistActive() ? 1.03 : 1;
@@ -2005,7 +2028,19 @@ function targetPaddleWidth(): number {
   const shrinkStacks = paddle.shrink > 0 ? paddle.shrinkStacks : 0;
   const minWidth = Math.max(126, base * 0.55);
   const maxWidth = Math.min(570, base + 138);
-  return clamp(base + widenStacks * 46 - shrinkStacks * 42, minWidth, maxWidth);
+  const boostedWidth = clamp(base + widenStacks * 46 - shrinkStacks * 42, minWidth, maxWidth);
+  const biteStacks = activeChomperBiteStacks();
+  if (biteStacks === 0) return boostedWidth;
+  const biteMinWidth = Math.max(58, base * 0.22);
+  return clamp(boostedWidth * Math.pow(CHOMPER_PADDLE_SHRINK_FACTOR, biteStacks), biteMinWidth, maxWidth);
+}
+
+function activeChomperBiteStacks(): number {
+  return paddle.chomperBites.length;
+}
+
+function chomperBiteTimeRemaining(): number {
+  return paddle.chomperBites.reduce((longest, remaining) => Math.max(longest, remaining), 0);
 }
 
 function updateMachineGun(dt: number): void {
@@ -4001,10 +4036,34 @@ function updateChompers(dt: number): void {
 
     chomper.x += chomper.vx * dt;
     chomper.y += chomper.vy * dt;
+    if (chomper.mode === "hunt" && chomperHitsPaddle(chomper)) {
+      applyChomperPaddleBite(chomper);
+    }
     if (chomper.y < -160 || chomper.y > WORLD_H + 160 || chomper.x < -180 || chomper.x > WORLD_W + 180) {
       chomper.dead = true;
     }
   }
+}
+
+function chomperHitsPaddle(chomper: Chomper): boolean {
+  const halfW = paddle.w / 2;
+  const halfH = paddle.h / 2;
+  const closestX = clamp(chomper.x, paddle.x - halfW, paddle.x + halfW);
+  const closestY = clamp(chomper.y, paddle.y - halfH, paddle.y + halfH);
+  const dx = chomper.x - closestX;
+  const dy = chomper.y - closestY;
+  return dx * dx + dy * dy <= chomper.r * chomper.r;
+}
+
+function applyChomperPaddleBite(chomper: Chomper): void {
+  paddle.chomperBites.push(CHOMPER_PADDLE_BITE_DURATION);
+  const stacks = activeChomperBiteStacks();
+  addShake(9);
+  burst(chomper.x, chomper.y, 0xff3f3f, 34, 1);
+  shockwave(paddle.x, paddle.y - 18, 0xff3f3f, 86 + stacks * 10);
+  popText(paddle.x, paddle.y - 92, `CHOMPED x${stacks}`, 0xff3f3f);
+  beep(92, 0.11, "sawtooth", 0.055);
+  sendChomperAway(chomper);
 }
 
 function sendChomperAway(chomper: Chomper): void {
@@ -4281,6 +4340,7 @@ function endGame(): void {
   state.autoLaser = 0;
   state.autoLaserClock = 0;
   clearLevelObjects(false);
+  paddle.chomperBites.length = 0;
   pauseBtn.textContent = "Pause";
   const title = overlay.querySelector("h1");
   const copy = overlay.querySelector("p");
@@ -4394,7 +4454,13 @@ function renderFrame(dt: number): void {
 
   if (paddle.sprite) {
     paddle.sprite.position.set(paddle.x, paddle.y);
-    paddle.sprite.tint = paddle.shrink > 0 ? 0xff7092 : paddle.widen > 0 ? 0x74efff : 0xffffff;
+    const biteStacks = activeChomperBiteStacks();
+    if (biteStacks > 0) {
+      const redBreath = 0.5 + Math.sin(state.levelClock * 9 + biteStacks * 0.45) * 0.5;
+      paddle.sprite.tint = mixColor(0xffffff, 0xff2f2f, 0.42 + redBreath * 0.48);
+    } else {
+      paddle.sprite.tint = paddle.shrink > 0 ? 0xff7092 : paddle.widen > 0 ? 0x74efff : 0xffffff;
+    }
     paddle.sprite.width += ((paddle.w + 70) - paddle.sprite.width) * Math.min(1, dt * 22);
     paddle.sprite.height = 96;
   }
@@ -4901,6 +4967,14 @@ function renderEffectStrip(): void {
   if (state.slowField > 0) effects.push({ label: "SLOW", color: 0x58e7ff, remaining: state.slowField, max: 7 });
   if (paddle.widen > 0) effects.push({ label: "WIDE", color: 0x13dbff, remaining: paddle.widen, max: 20 });
   if (paddle.shrink > 0) effects.push({ label: "TIGHT", color: 0xff4f78, remaining: paddle.shrink, max: 20 });
+  if (activeChomperBiteStacks() > 0) {
+    effects.push({
+      label: `CHOMP x${activeChomperBiteStacks()}`,
+      color: 0xff3f3f,
+      remaining: chomperBiteTimeRemaining(),
+      max: CHOMPER_PADDLE_BITE_DURATION
+    });
+  }
   if (state.mercyBudget > 0) effects.push({ label: `MERCY ${state.mercyBudget}/${state.maxMercyPerLife}`, color: 0xffd84a, remaining: 1, max: 1 });
   if (effects.length === 0) return;
 
@@ -4983,6 +5057,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function mixColor(from: number, to: number, amount: number): number {
+  const t = clamp(amount, 0, 1);
+  const fr = (from >> 16) & 255;
+  const fg = (from >> 8) & 255;
+  const fb = from & 255;
+  const tr = (to >> 16) & 255;
+  const tg = (to >> 8) & 255;
+  const tb = to & 255;
+  const r = Math.round(fr + (tr - fr) * t);
+  const g = Math.round(fg + (tg - fg) * t);
+  const b = Math.round(fb + (tb - fb) * t);
+  return (r << 16) | (g << 8) | b;
+}
+
 function addShake(amount: number): void {
   const cap = balls.length > 35 ? 5.5 : balls.length > 18 ? 7 : 10;
   state.shake = Math.min(cap, Math.max(state.shake, amount));
@@ -5019,8 +5107,7 @@ canvas.addEventListener("pointermove", (event) => {
 canvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   state.pointerX = pointerToWorld(event);
-  if (!state.running) startGame();
-  else launch();
+  if (state.running) launch();
 });
 
 window.addEventListener("keydown", (event) => {
@@ -5040,14 +5127,12 @@ window.addEventListener("resize", () => {
   resizeRenderer();
 });
 
+pauseBtn.addEventListener("click", togglePause);
+launchBtn.addEventListener("click", launch);
 muteBtn.addEventListener("click", () => {
   state.muted = !state.muted;
   muteBtn.textContent = state.muted ? "Sound Off" : "Sound On";
 });
-
-startBtn.addEventListener("click", startGame);
-pauseBtn.addEventListener("click", togglePause);
-launchBtn.addEventListener("click", launch);
 
 declare global {
   interface Window {

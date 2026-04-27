@@ -80,6 +80,5 @@
   </main>
 
   <script type="module" src="/src/main.ts"></script>
-  <script>document.getElementById("overlay").insertAdjacentHTML("beforeend","<p id='dbg' style='color:#0f0;font-size:13px;margin:8px 0 0'>PAGE LOADED "+new Date().toISOString()+"</p>");window.addEventListener("error",function(e){var d=document.getElementById("dbg");if(d)d.textContent="JS ERROR: "+e.message+" "+(e.filename||"")});window.addEventListener("unhandledrejection",function(e){var d=document.getElementById("dbg");if(d)d.textContent="ASYNC ERROR: "+e.reason})</script>
 </body>
 </html>
