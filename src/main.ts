@@ -37,6 +37,9 @@ const CHOMPER_PADDLE_BITE_DURATION = 25;
 const CHOMPER_PADDLE_SHRINK_FACTOR = 0.75;
 const CHOMPER_SPAWN_WARNING_DURATION = 0.9;
 const CHOMPER_REPEL_DURATION = 8;
+const BRICK_DIFFICULTY_REDRAW_INTERVAL = 0.28;
+const BRICK_DIFFICULTY_REDRAW_EPSILON = 0.018;
+const HUD_UPDATE_INTERVAL = 1 / 20;
 
 type BrickType = "cyan" | "magenta" | "amber" | "green" | "steel" | "bomb";
 type BallKind = "green" | "yellow" | "red" | "bomb";
@@ -531,11 +534,13 @@ const state = {
   maxBallsRun: 0,
   level: 1,
   levelClock: 0,
+  hudClock: 0,
   levelToast: 0,
   shake: 0,
   flash: 0,
   lives: 3,
   brickDifficulty: 1,
+  brickDifficultyRedrawClock: 0,
   skillPressure: 1,
   levelAge: 0,
   levelStartBricks: 0,
@@ -717,6 +722,7 @@ const paddleZoneGfx = new Graphics();
 const flashGfx = new Graphics();
 const effectStripGfx = new Graphics();
 const effectStripLayer = new Container();
+const effectStripLabels: Text[] = [];
 const chomperWarningGfx = new Graphics();
 const pauseUpgradeGfx = new Graphics();
 const pauseUpgradeLayer = new Container();
@@ -908,6 +914,8 @@ function resetLevel(autoLaunch: boolean, keepBalls = false): void {
   }
   state.levelClock = 0;
   state.levelAge = 0;
+  state.hudClock = 0;
+  state.brickDifficultyRedrawClock = 0;
   state.levelToast = 2.4;
   state.velocityBrickKills = 0;
   state.velocityClock = 0;
@@ -1929,15 +1937,22 @@ function syncBrickHealth(brick: Brick): void {
 
 function updateDynamicBrickDifficulty(force: boolean): void {
   const next = currentBrickDifficulty();
-  if (!force && Math.abs(next - state.brickDifficulty) < 0.001) return;
+  if (!force) {
+    state.brickDifficultyRedrawClock = Math.max(0, state.brickDifficultyRedrawClock - FIXED_DT);
+    if (Math.abs(next - state.brickDifficulty) < BRICK_DIFFICULTY_REDRAW_EPSILON) return;
+    if (state.brickDifficultyRedrawClock > 0) return;
+    state.brickDifficultyRedrawClock = BRICK_DIFFICULTY_REDRAW_INTERVAL;
+  }
 
   state.brickDifficulty = next;
   for (let i = bricks.length - 1; i >= 0; i -= 1) {
     const brick = bricks[i];
+    const previousHp = brick.hp;
+    const previousMaxHp = brick.maxHp;
     syncBrickHealth(brick);
     if (brick.hp <= 0) {
       destroyBrick(brick, brick.x + brick.w / 2, brick.y + brick.h / 2, false);
-    } else {
+    } else if (force || brick.hp !== previousHp || brick.maxHp !== previousMaxHp) {
       drawBrick(brick);
     }
   }
@@ -1951,6 +1966,7 @@ function update(dt: number): void {
   state.levelAge += dt;
   state.bestComboRun = Math.max(state.bestComboRun, state.combo);
   state.maxBallsRun = Math.max(state.maxBallsRun, balls.length);
+  state.hudClock = Math.max(0, state.hudClock - dt);
   state.shake = Math.max(0, state.shake - 52 * dt);
   state.flash = Math.max(0, state.flash - dt);
   state.levelToast = Math.max(0, state.levelToast - dt);
@@ -2013,7 +2029,10 @@ function update(dt: number): void {
     if (!state.running) return;
   }
 
-  updateHud();
+  if (state.hudClock <= 0) {
+    state.hudClock = HUD_UPDATE_INTERVAL;
+    updateHud();
+  }
 }
 
 function movePaddle(dt: number): void {
@@ -4324,6 +4343,7 @@ function makeBall(x: number, y: number, angle: number, speed: number, radius: nu
   if (balls.length >= MAX_BALLS) return;
   const profile = ballProfiles[kind];
   const aura = new Graphics();
+  aura.circle(0, 0, 1).fill({ color: 0xffffff, alpha: 1 });
   const sprite = new Sprite(spriteTextures.ball);
   sprite.anchor.set(0.5);
   sprite.tint = profile.color;
@@ -4667,11 +4687,15 @@ function renderFrame(dt: number): void {
     const frenzyScale = ball.frenzy > 0 ? 1.14 + Math.sin(state.levelClock * 22) * 0.04 : 1;
     const auraAlpha = ball.kamikaze > 0 ? 0.56 : ball.kind === "bomb" ? 0.38 : ball.kind === "red" ? 0.34 : ball.kind === "yellow" ? 0.22 : 0.1;
     const auraScale = ball.kamikaze > 0 ? 2.65 : ball.kind === "bomb" ? 2.35 : ball.kind === "red" ? 2.2 : ball.kind === "yellow" ? 1.78 : 1.45;
-    ball.aura.clear()
-      .circle(0, 0, ball.r * auraScale * (ball.frenzy > 0 ? 1.25 : 1))
-      .fill({ color: profile.color, alpha: (ball.hero ? 0.42 : auraAlpha) + (ball.frenzy > 0 ? 0.16 : 0) });
     ball.aura.position.set(ball.x, ball.y);
-    ball.aura.scale.set(1 + Math.sin(state.levelClock * (ball.kind === "red" ? 14 : 9)) * 0.04);
+    ball.aura.tint = profile.color;
+    ball.aura.alpha = (ball.hero ? 0.42 : auraAlpha) + (ball.frenzy > 0 ? 0.16 : 0);
+    ball.aura.scale.set(
+      ball.r *
+      auraScale *
+      (ball.frenzy > 0 ? 1.25 : 1) *
+      (1 + Math.sin(state.levelClock * (ball.kind === "red" ? 14 : 9)) * 0.04)
+    );
     ball.sprite.tint = ball.kamikaze > 0 ? 0xffffff : ball.hero ? 0xffffff : profile.color;
     ball.sprite.width += (ball.r * 4 * heroScale * frenzyScale - ball.sprite.width) * Math.min(1, dt * 16);
     ball.sprite.height = ball.sprite.width;
@@ -5154,7 +5178,6 @@ function updateChomperWarning(dt: number): void {
 
 function renderEffectStrip(): void {
   effectStripGfx.clear();
-  effectStripLayer.removeChildren();
   const effects: Array<{ label: string; color: number; remaining: number; max: number }> = [];
   if (state.feverTime > 0) effects.push({ label: "FEVER", color: currentLevel().tint, remaining: state.feverTime, max: 10 + clampUpgradeTier(state.runUpgrades.fever) * 0.75 });
   if (state.pierce > 0) effects.push({ label: "PHASE", color: 0xb891ff, remaining: state.pierce, max: 9 });
@@ -5177,7 +5200,10 @@ function renderEffectStrip(): void {
     });
   }
   if (state.mercyBudget > 0) effects.push({ label: `MERCY ${state.mercyBudget}/${state.maxMercyPerLife}`, color: 0xffd84a, remaining: 1, max: 1 });
-  if (effects.length === 0) return;
+  if (effects.length === 0) {
+    for (const label of effectStripLabels) label.visible = false;
+    return;
+  }
 
   const barW = 72;
   const startX = WORLD_W - 60 - effects.length * 90;
@@ -5194,13 +5220,23 @@ function renderEffectStrip(): void {
       .fill({ color: fx.color, alpha: 0.55 })
       .roundRect(x, y, barW, 28, 5)
       .stroke({ width: 1, color: fx.color, alpha: 0.7 });
-    const label = new Text({
-      text: fx.label,
-      style: { fontFamily: "Inter, Arial, sans-serif", fontSize: 11, fontWeight: "800", fill: 0xffffff }
-    });
-    label.anchor.set(0.5);
+    let label = effectStripLabels[i];
+    if (!label) {
+      label = new Text({
+        text: fx.label,
+        style: { fontFamily: "Inter, Arial, sans-serif", fontSize: 11, fontWeight: "800", fill: 0xffffff }
+      });
+      label.anchor.set(0.5);
+      effectStripLabels[i] = label;
+      effectStripLayer.addChild(label);
+    }
+    label.visible = true;
+    label.text = fx.label;
     label.position.set(x + barW / 2, y + 14);
-    effectStripLayer.addChild(label);
+  }
+
+  for (let i = effects.length; i < effectStripLabels.length; i += 1) {
+    effectStripLabels[i].visible = false;
   }
 }
 
