@@ -35,16 +35,18 @@ const MAX_FLOAT_TEXTS = 24;
 const CHOMPER_MIN_DISTANCE = 520;
 const CHOMPER_PADDLE_BITE_DURATION = 25;
 const CHOMPER_PADDLE_SHRINK_FACTOR = 0.75;
+const CHOMPER_SPAWN_WARNING_DURATION = 0.9;
+const CHOMPER_REPEL_DURATION = 8;
 
 type BrickType = "cyan" | "magenta" | "amber" | "green" | "steel" | "bomb";
 type BallKind = "green" | "yellow" | "red" | "bomb";
 type LaserKind = "laser" | "auto" | "bazooka";
-type PowerKind = "split" | "cluster" | "bombcluster" | "laser" | "autolaser" | "bazooka" | "widen" | "shrink" | "slow" | "timewarp" | "pierce" | "train" | "goldrush" | "burst" | "machine" | "overcharge" | "bombbait" | "redstorm" | "kamikaze" | "blackhole" | "mirror" | "cascade" | "orbitals" | "jackpot" | "nova" | "choice";
+type PowerKind = "split" | "cluster" | "bombcluster" | "laser" | "autolaser" | "bazooka" | "widen" | "shrink" | "slow" | "timewarp" | "pierce" | "train" | "goldrush" | "burst" | "machine" | "overcharge" | "bombbait" | "redstorm" | "kamikaze" | "blackhole" | "mirror" | "cascade" | "orbitals" | "repel" | "jackpot" | "nova" | "choice";
 type BrickRole = "normal" | "shell" | "core" | "widen" | "shrink";
 type MotionStyle = "still" | "current" | "breath" | "lanes" | "orbit" | "gates" | "storm";
 type Pattern = "reef" | "crater" | "lanes" | "diamond" | "fortress" | "storm" | "vault" | "coil";
 type SpriteName = "paddle" | "ball" | "split" | "laser" | "burst" | "shard";
-type UpgradeId = "paddle" | "red" | "machine" | "bombs" | "perfect" | "mercy";
+type UpgradeId = "paddle" | "red" | "machine" | "bombs" | "perfect" | "mercy" | "guard" | "fever";
 type ObjectiveId = "core" | "combo" | "perfect";
 
 interface UpgradeOption {
@@ -481,7 +483,9 @@ const upgradeOptions: UpgradeOption[] = [
   { id: "machine", title: "Stream Feed", body: "Machine-gun drops fire extra balls." },
   { id: "bombs", title: "Bigger Bombs", body: "Bomb cores hit wider and score more." },
   { id: "perfect", title: "Perfect Zone", body: "Center hits grant stronger frenzy." },
-  { id: "mercy", title: "Breach Sense", body: "One-ball stalls breach faster." }
+  { id: "mercy", title: "Breach Sense", body: "One-ball stalls breach faster." },
+  { id: "guard", title: "Bite Guard", body: "Block and repel chompers before they shrink you." },
+  { id: "fever", title: "Fever Drive", body: "Combo milestones trigger longer, richer fever." }
 ];
 
 const UPGRADE_MAX_TIER = 8;
@@ -568,12 +572,17 @@ const state = {
     machine: 0,
     bombs: 0,
     perfect: 0,
-    mercy: 0
+    mercy: 0,
+    guard: 0,
+    fever: 0
   } as Record<UpgradeId, number>,
   chomperCooldown: 9,
+  chomperRepel: 0,
+  chomperGuard: 0,
   singleBallClock: 0,
   stallBreachClock: 0,
   feverPulse: 0,
+  feverTime: 0,
   slowField: 0,
   mercyDropClock: 0,
   machineGunShots: 0,
@@ -893,6 +902,9 @@ function resetLevel(autoLaunch: boolean, keepBalls = false): void {
     state.goldRush = 0;
     state.autoLaser = 0;
     state.autoLaserClock = 0;
+    state.chomperRepel = 0;
+    state.chomperGuard = maxChomperGuardCharges();
+    state.feverTime = 0;
   }
   state.levelClock = 0;
   state.levelAge = 0;
@@ -1757,8 +1769,9 @@ function updateDifficultyDirector(dt: number): void {
   const objectiveRisk = objectivePressure();
   const mountainRatio = brickMountainRatio();
   const ballSafety = balls.length <= 1 ? 1 : balls.length <= 2 ? 0.78 : balls.length <= 4 ? 0.42 : 0;
-  const effectsActive = state.overcharge > 0 || state.redStorm > 0 || state.pierce > 0 || state.timeWarp > 0 || state.goldRush > 0;
+  const effectsActive = state.overcharge > 0 || state.redStorm > 0 || state.pierce > 0 || state.timeWarp > 0 || state.goldRush > 0 || state.feverTime > 0;
   const hitAccuracy = state.paddleHits + state.paddleDrains > 0 ? state.paddleHits / (state.paddleHits + state.paddleDrains) : 0.5;
+  const chomperThreat = chomperThreatPressure();
 
   state.directorClearRate += ((clearDelta / Math.max(dt, 0.001)) - state.directorClearRate) * Math.min(1, dt * 1.65);
   state.directorBallTrend += (ballDelta - state.directorBallTrend) * Math.min(1, dt * 2.2);
@@ -1782,6 +1795,8 @@ function updateDifficultyDirector(dt: number): void {
     (state.directorBallTrend < -2 ? 0.12 : 0) +
     (hitAccuracy < 0.4 ? 0.14 : 0) +
     (state.consecutiveFails >= 3 ? 0.18 : state.consecutiveFails >= 2 ? 0.09 : 0) -
+    state.chomperGuard * 0.04 +
+    chomperThreat * 0.32 -
     clearRatio * 0.14,
     0,
     1
@@ -1807,6 +1822,7 @@ function updateDifficultyDirector(dt: number): void {
   hpTarget += Math.max(0, upgradeTotal - 8) * 0.018;
   hpTarget += state.directorDominance * 0.38;
   hpTarget -= state.directorPanic * 0.2;
+  hpTarget -= chomperThreat * 0.22;
   hpTarget += clamp(paceDelta * 0.5, -0.1, 0.35);
   if (state.combo >= 18) hpTarget += 0.07;
   if (state.combo >= 36) hpTarget += 0.12;
@@ -1825,11 +1841,13 @@ function updateDifficultyDirector(dt: number): void {
   if (state.levelAge > 70 && clearRatio < 0.35) hpTarget -= 0.2;
   if (state.singleBallClock > 5) hpTarget -= 0.16;
   if (state.consecutiveFails >= 2) hpTarget -= 0.12;
+  if (activeChomperBiteStacks() > 0) hpTarget -= 0.18;
   hpTarget = clamp(hpTarget, balls.length <= 2 ? 0.76 : 0.92, 2.18);
 
   let paceTarget = 1;
   paceTarget += state.directorDominance * 0.3;
   paceTarget -= state.directorPanic * 0.35;
+  paceTarget -= chomperThreat * 0.18;
   paceTarget -= (1 - hitAccuracy) * 0.15;
   if (state.consecutiveFails >= 2) paceTarget -= 0.18;
   if (state.consecutiveSuccesses >= 3) paceTarget += 0.12;
@@ -1872,6 +1890,8 @@ function getPreferredPowerupKind(): PowerKind | null {
 function chooseDirectorAssist(objectiveRisk: number, mountainRatio: number): PowerKind {
   const objective = state.objective;
   const preferred = getPreferredPowerupKind();
+  const chomperTrouble = chomperThreatPressure() > 0.22 || activeChomperBiteStacks() > 0;
+  if (chomperTrouble && state.chomperGuard <= 0) return Math.random() < 0.68 ? "repel" : "widen";
   if (balls.length <= 1) return preferred || (Math.random() < 0.62 ? "split" : "mirror");
   if (objectiveRisk > 0.55 && objective && !objective.complete && !objective.failed) {
     if (objective.id === "core") return mountainRatio > 0.45 ? "bazooka" : "cascade";
@@ -1892,12 +1912,13 @@ function maybeDirectorAssist(dt: number, clearRatio: number, objectiveRisk: numb
   const mountain = balls.length <= 5 && mountainRatio > 0.34;
   const challengeTrouble = objectiveRisk > 0.62 && bricks.length > 10;
   const panicAssist = state.directorPanic > 0.74 && bricks.length > 8;
-  if (!stuck && !lowBalls && !mountain && !challengeTrouble && !panicAssist) return;
+  const chomperTrouble = (activeChomperBiteStacks() > 0 || (chompers.length > 0 && state.chomperGuard <= 0)) && bricks.length > 8;
+  if (!stuck && !lowBalls && !mountain && !challengeTrouble && !panicAssist && !chomperTrouble) return;
 
-  state.directorHelpClock = challengeTrouble ? 10 : stuck ? 12 : lowBalls ? 8 : 9;
+  state.directorHelpClock = challengeTrouble ? 10 : stuck ? 12 : lowBalls ? 8 : chomperTrouble ? 7 : 9;
   const forced = chooseDirectorAssist(objectiveRisk, mountainRatio);
   spawnPowerup(paddle.x + rand(-220, 220), paddle.y - 330, forced);
-  popText(paddle.x, paddle.y - 96, challengeTrouble ? "CLUTCH DROP" : "MOMENTUM", 0x83f7ff);
+  popText(paddle.x, paddle.y - 96, chomperTrouble ? "ANTI-CHOMP" : challengeTrouble ? "CLUTCH DROP" : "MOMENTUM", 0x83f7ff);
 }
 
 function syncBrickHealth(brick: Brick): void {
@@ -1941,10 +1962,12 @@ function update(dt: number): void {
   state.pierce = Math.max(0, state.pierce - dt);
   state.goldRush = Math.max(0, state.goldRush - dt);
   state.autoLaser = Math.max(0, state.autoLaser - dt);
+  state.chomperRepel = Math.max(0, state.chomperRepel - dt);
+  state.feverTime = Math.max(0, state.feverTime - dt);
   paddle.cooldown = Math.max(0, paddle.cooldown - dt);
-  state.comboClock -= dt;
+  state.comboClock -= state.feverTime > 0 ? dt * 0.58 : dt;
   if (state.comboClock <= 0 && state.combo > 1) {
-    state.combo = Math.max(1, state.combo - Math.ceil(dt * 16));
+    state.combo = Math.max(1, state.combo - Math.ceil(dt * (state.feverTime > 0 ? 7 : 16)));
   }
 
   movePaddle(dt);
@@ -2041,6 +2064,15 @@ function activeChomperBiteStacks(): number {
 
 function chomperBiteTimeRemaining(): number {
   return paddle.chomperBites.reduce((longest, remaining) => Math.max(longest, remaining), 0);
+}
+
+function chomperThreatPressure(): number {
+  const hunting = chompers.filter((chomper) => chomper.mode === "hunt").length;
+  const bitePressure = activeChomperBiteStacks() * 0.3;
+  const activePressure = hunting * 0.12;
+  const exposedPressure = state.chomperGuard <= 0 && (bitePressure > 0 || activePressure > 0) ? 0.12 : 0;
+  const relief = state.chomperRepel > 0 ? 0.34 : 0;
+  return clamp(bitePressure + activePressure + exposedPressure - relief, 0, 1);
 }
 
 function updateMachineGun(dt: number): void {
@@ -2536,9 +2568,10 @@ function damageBrick(brick: Brick, x: number, y: number, damage: number, sourceB
   brick.damage += damage;
   syncBrickHealth(brick);
   brick.flash = 1;
-  state.comboClock = 1.85;
+  const feverTier = clampUpgradeTier(state.runUpgrades.fever);
+  state.comboClock = Math.max(state.comboClock, state.feverTime > 0 ? 2.35 + feverTier * 0.12 : 1.85);
   state.combo = Math.min(99, state.combo + 1);
-  const scoreBoost = state.goldRush > 0 ? 2.2 : 1;
+  const scoreBoost = (state.goldRush > 0 ? 2.2 : 1) * (state.feverTime > 0 ? 1.25 + feverTier * 0.04 : 1);
   const scoreGain = Math.floor(32 * state.combo * (brick.type === "steel" ? 2 : 1) * scoreBoost);
   state.score += scoreGain;
   addShake(brick.type === "bomb" ? 8 : state.combo >= 25 ? 3.4 : state.combo >= 10 ? 2.7 : 2.1);
@@ -2590,16 +2623,34 @@ function playHitSound(sourceBall: Ball | undefined, brick: Brick): void {
 }
 
 function checkComboMilestone(x: number, y: number): void {
-  const milestone = state.combo >= 50 ? 50 : state.combo >= 25 ? 25 : state.combo >= 10 ? 10 : 0;
+  const milestone = state.combo >= 75 ? 75 : state.combo >= 50 ? 50 : state.combo >= 25 ? 25 : state.combo >= 10 ? 10 : 0;
   if (milestone === 0 || state.lastComboSting >= milestone) return;
 
   state.lastComboSting = milestone;
-  const color = milestone >= 50 ? 0xff4f38 : milestone >= 25 ? 0xfff26b : 0x13dbff;
+  const color = milestone >= 75 ? 0xffffff : milestone >= 50 ? 0xff4f38 : milestone >= 25 ? 0xfff26b : 0x13dbff;
   popText(x, y - 42, `x${milestone} CHAIN`, color);
   shockwave(x, y, color, 80 + milestone);
-  addShake(milestone >= 50 ? 8 : milestone >= 25 ? 5 : 3);
-  beep(milestone >= 50 ? 880 : milestone >= 25 ? 720 : 560, 0.08, "triangle", 0.045);
-  beep(milestone >= 50 ? 1320 : milestone >= 25 ? 940 : 760, 0.065, "square", 0.026);
+  addShake(milestone >= 75 ? 10 : milestone >= 50 ? 8 : milestone >= 25 ? 5 : 3);
+  beep(milestone >= 75 ? 1040 : milestone >= 50 ? 880 : milestone >= 25 ? 720 : 560, 0.08, "triangle", 0.045);
+  beep(milestone >= 75 ? 1560 : milestone >= 50 ? 1320 : milestone >= 25 ? 940 : 760, 0.065, "square", 0.026);
+  startComboFever(milestone, x, y);
+}
+
+function startComboFever(milestone: number, x: number, y: number): void {
+  if (milestone < 25) return;
+  const tier = clampUpgradeTier(state.runUpgrades.fever);
+  const duration = (milestone >= 75 ? 10 : milestone >= 50 ? 7.5 : 5.2) + tier * 0.75;
+  state.feverTime = Math.max(state.feverTime, duration);
+  state.feverPulse = 1;
+  state.comboClock = Math.max(state.comboClock, 2.4 + tier * 0.14);
+  popText(WORLD_W / 2, 126, milestone >= 75 ? "MAX FEVER" : "FEVER", milestone >= 75 ? 0xffffff : currentLevel().tint);
+  shockwave(WORLD_W / 2, 130, currentLevel().tint, 90 + milestone);
+  if (milestone >= 50 && balls.length < MAX_BALLS) {
+    splitBalls(x, y, Math.min(4, 2 + Math.floor(tier / 3)), 0.84);
+  }
+  if (milestone >= 75 && tier > 0 && state.bankedPowerChoices < 4) {
+    bankPowerChoice("FEVER PICK");
+  }
 }
 
 function maybeApplyHiddenSynergy(ball: Ball, x: number, y: number): void {
@@ -2762,7 +2813,8 @@ function spawnPowerup(x: number, y: number, forced?: PowerKind): void {
   const pressurePenalty = state.skillPressure > 1.18 ? 0.08 : 0;
   const dominancePenalty = state.directorDominance * 0.1;
   const pityBonus = Math.min(0.16, state.powerDropPity * 0.008);
-  const dropChance = clamp(level.powerChance * 0.62 * currentPaceDifficulty() + state.directorDropBias + mercyChance + pityBonus - pressurePenalty - dominancePenalty, 0.06, 0.46);
+  const chomperRelief = chomperThreatPressure() > 0.2 ? 0.075 : 0;
+  const dropChance = clamp(level.powerChance * 0.62 * currentPaceDifficulty() + state.directorDropBias + mercyChance + pityBonus + chomperRelief - pressurePenalty - dominancePenalty, 0.06, 0.46);
   if (!forced && Math.random() > dropChance) {
     state.powerDropPity += 1;
     state.goldenDropPity += 1;
@@ -2774,7 +2826,8 @@ function spawnPowerup(x: number, y: number, forced?: PowerKind): void {
     const splitWeight = (level.splitWeight ?? 0.45) * 0.72;
     const laserWeight = (level.laserWeight ?? 0.24) * 0.74;
     const roll = Math.random();
-    if (state.directorDominance > 0.58 && Math.random() < 0.16) kind = "shrink";
+    if (chomperThreatPressure() > 0.32 && state.chomperGuard <= 0 && Math.random() < 0.34) kind = "repel";
+    else if (state.directorDominance > 0.58 && Math.random() < 0.16) kind = "shrink";
     else if (balls.length <= 2 && roll < 0.32) kind = "split";
     else if (roll < splitWeight) kind = "split";
     else if (roll < splitWeight + laserWeight) {
@@ -2800,6 +2853,7 @@ function spawnPowerup(x: number, y: number, forced?: PowerKind): void {
         ["mirror", balls.length <= 4 ? 0.062 : 0.036],
         ["cascade", 0.042],
         ["orbitals", 0.034],
+        ["repel", chomperThreatPressure() > 0 ? 0.09 : 0.026],
         ["kamikaze", 0.006],
         ["nova", 0.005],
         ["choice", 0.026],
@@ -3022,6 +3076,27 @@ function createPowerupToken(kind: PowerKind, golden = false): Graphics {
       .circle(-15, 0, 4)
       .circle(15, 0, 4)
       .fill({ color: 0xffffff, alpha: 0.88 });
+  } else if (kind === "repel") {
+    token
+      .circle(0, 0, 10)
+      .stroke({ width: 4, color: 0xffffff, alpha: 0.9 })
+      .moveTo(-20, 0)
+      .lineTo(-9, -8)
+      .moveTo(-20, 0)
+      .lineTo(-9, 8)
+      .moveTo(20, 0)
+      .lineTo(9, -8)
+      .moveTo(20, 0)
+      .lineTo(9, 8)
+      .moveTo(0, -20)
+      .lineTo(-8, -9)
+      .moveTo(0, -20)
+      .lineTo(8, -9)
+      .moveTo(0, 20)
+      .lineTo(-8, 9)
+      .moveTo(0, 20)
+      .lineTo(8, 9)
+      .stroke({ width: 3, color: 0xffffff, alpha: 0.86 });
   } else if (kind === "jackpot") {
     token
       .poly([0, -19, 17, -5, 10, 17, -10, 17, -17, -5])
@@ -3089,6 +3164,7 @@ function powerupColor(kind: PowerKind): number {
     mirror: 0xe7dcff,
     cascade: 0x00ffd1,
     orbitals: 0x83f7ff,
+    repel: 0x66f7ff,
     jackpot: 0xffffff,
     nova: 0xff6a00,
     choice: 0xffffff
@@ -3120,6 +3196,7 @@ function powerupLabel(kind: PowerKind): string {
     mirror: "MIRROR",
     cascade: "CASCADE",
     orbitals: "ORBIT",
+    repel: "REPEL",
     jackpot: "JACKPOT",
     nova: "NOVA",
     choice: "BANK"
@@ -3223,10 +3300,45 @@ function applyPowerup(kind: PowerKind): void {
   if (kind === "mirror") mirrorBalls();
   if (kind === "cascade") startCascade();
   if (kind === "orbitals") launchOrbitals();
+  if (kind === "repel") startChomperRepel();
   if (kind === "jackpot") triggerJackpot();
   if (kind === "nova") startNova();
-  const selfLabels: PowerKind[] = ["laser", "autolaser", "bazooka", "cluster", "bombcluster", "widen", "shrink", "train", "overcharge", "bombbait", "redstorm", "kamikaze", "blackhole", "mirror", "cascade", "orbitals", "jackpot", "nova"];
+  const selfLabels: PowerKind[] = ["laser", "autolaser", "bazooka", "cluster", "bombcluster", "widen", "shrink", "train", "overcharge", "bombbait", "redstorm", "kamikaze", "blackhole", "mirror", "cascade", "orbitals", "repel", "jackpot", "nova"];
   if (!selfLabels.includes(kind)) popText(paddle.x, paddle.y - 78, powerupLabel(kind), powerupColor(kind));
+}
+
+function maxChomperGuardCharges(): number {
+  const tier = clampUpgradeTier(state.runUpgrades.guard);
+  if (tier <= 0) return 0;
+  return Math.min(3, 1 + Math.floor((tier - 1) / 3));
+}
+
+function startChomperRepel(): void {
+  const tier = clampUpgradeTier(state.runUpgrades.guard);
+  state.chomperRepel = Math.max(state.chomperRepel, CHOMPER_REPEL_DURATION + tier * 0.75);
+  state.chomperGuard = Math.min(Math.max(1, maxChomperGuardCharges()), state.chomperGuard + 1);
+  state.chomperCooldown = Math.max(state.chomperCooldown, 5.5 + tier * 0.4);
+
+  for (const chomper of chompers) {
+    repelChomperFromPaddle(chomper, 1);
+    sendChomperAway(chomper);
+  }
+
+  state.flash = Math.max(state.flash, 0.12);
+  addShake(5);
+  burst(paddle.x, paddle.y - 44, powerupColor("repel"), 38, 0.92);
+  shockwave(paddle.x, paddle.y - 30, powerupColor("repel"), 132);
+  popText(paddle.x, paddle.y - 112, "CHOMPER REPEL", powerupColor("repel"));
+  beep(980, 0.07, "triangle", 0.035);
+}
+
+function repelChomperFromPaddle(chomper: Chomper, force: number): void {
+  const dx = chomper.x - paddle.x;
+  const dy = chomper.y - paddle.y;
+  const d = Math.hypot(dx, dy) || 1;
+  chomper.vx += dx / d * 660 * force;
+  chomper.vy += dy / d * 520 * force - 160 * force;
+  chomper.target = null;
 }
 
 function startKamikaze(): void {
@@ -3587,6 +3699,7 @@ function pickPowerChoices(count: number): PowerKind[] {
     "mirror",
     "cascade",
     "orbitals",
+    "repel",
     "kamikaze",
     "train",
     "timewarp",
@@ -3633,6 +3746,7 @@ function powerChoiceBody(kind: PowerKind): string {
     mirror: "Clone your strongest active balls across the arena.",
     cascade: "Start a fast chain reaction through nearby bricks.",
     orbitals: "Launch a ring of hot balls from the paddle.",
+    repel: "Push chompers away and add one bite block.",
     jackpot: "Trigger two rare powers and bank another pick.",
     nova: "Ultra rare: erupt 100 balls in a 360-degree stream from a live ball.",
     choice: "Bank another end-of-age power pick."
@@ -3693,14 +3807,35 @@ function upgradeStackBody(id: UpgradeId, tier: number): string {
     machine: `${name} stack. Spray and train powers fire more balls with higher caps.${overdrive}`,
     bombs: `${name} stack. Bomb balls, bazookas, and bomb cores splash wider.${overdrive}`,
     perfect: `${name} stack. Perfect hits kick harder, score more, and frenzy longer.${overdrive}`,
-    mercy: `${name} stack. One-ball comebacks trigger faster and spawn more help.${overdrive}`
+    mercy: `${name} stack. One-ball comebacks trigger faster and spawn more help.${overdrive}`,
+    guard: `${name} stack. Start ages with bite guards, repel chompers, and shorten bite stacks.${overdrive}`,
+    fever: `${name} stack. Combo fever lasts longer, scores harder, and pays out at huge chains.${overdrive}`
   }[id];
 }
 
 function pickUpgradeChoices(): UpgradeOption[] {
   const available = upgradeOptions.filter((upgrade) => state.runUpgrades[upgrade.id] < UPGRADE_MAX_TIER);
-  const pool = [...(available.length >= 3 ? available : upgradeOptions)].sort(() => Math.random() - 0.5);
-  return pool.slice(0, 3);
+  const source = available.length >= 3 ? available : upgradeOptions;
+  const weighted = [...source].sort((a, b) => upgradeChoiceScore(b.id) - upgradeChoiceScore(a.id));
+  const picks: UpgradeOption[] = [];
+  for (const upgrade of weighted) {
+    if (picks.some((pick) => pick.id === upgrade.id)) continue;
+    picks.push(upgrade);
+    if (picks.length >= 3) break;
+  }
+  return picks.sort(() => Math.random() - 0.5);
+}
+
+function upgradeChoiceScore(id: UpgradeId): number {
+  const tier = clampUpgradeTier(state.runUpgrades[id]);
+  const underOwned = (UPGRADE_MAX_TIER - tier) * 0.08;
+  const jitter = Math.random() * 0.5;
+  const biteNeed = activeChomperBiteStacks() > 0 || chompers.length > 0 || state.consecutiveFails > 0;
+  const comboNeed = state.bestComboRun >= 25 || state.objective?.id === "combo";
+  if (id === "guard" && biteNeed) return 1.2 + underOwned + jitter;
+  if (id === "fever" && comboNeed) return 1.08 + underOwned + jitter;
+  if (id === "mercy" && (state.consecutiveFails > 0 || state.lives <= 1)) return 1 + underOwned + jitter;
+  return underOwned + jitter;
 }
 
 function applyUpgrade(id: UpgradeId): void {
@@ -3725,6 +3860,14 @@ function applyUpgrade(id: UpgradeId): void {
   } else if (id === "mercy") {
     state.singleBallClock = Math.max(state.singleBallClock, 2 + newTier * 0.6);
     state.stallBreachClock = Math.max(state.stallBreachClock, 4 + newTier * 0.8);
+  } else if (id === "guard") {
+    state.chomperGuard = Math.min(maxChomperGuardCharges(), state.chomperGuard + 1);
+    state.chomperRepel = Math.max(state.chomperRepel, 2.5 + newTier * 0.45);
+    state.chomperCooldown = Math.max(state.chomperCooldown, 4.5 + newTier * 0.4);
+  } else if (id === "fever") {
+    state.feverTime = Math.max(state.feverTime, 3.5 + newTier * 0.7);
+    state.comboClock = Math.max(state.comboClock, 2.2 + newTier * 0.12);
+    state.feverPulse = 1;
   }
 
   if (newTier > 4) {
@@ -3996,15 +4139,22 @@ function updateChompers(dt: number): void {
     chomper.age += dt;
 
     if (chomper.mode === "hunt") {
-      if (!chomper.target || !balls.includes(chomper.target)) {
+      if (state.chomperRepel > 0) {
+        repelChomperFromPaddle(chomper, dt * 3.2);
+        if (chomper.y > paddle.y - 330) sendChomperAway(chomper);
+      }
+
+      if (chomper.mode === "hunt" && (!chomper.target || !balls.includes(chomper.target))) {
         chomper.target = chooseChomperTarget(chomper.x, chomper.y);
       }
 
-      if (!chomper.target) {
+      if (chomper.mode === "hunt" && !chomper.target) {
         sendChomperAway(chomper);
-      } else {
-        const dx = chomper.target.x - chomper.x;
-        const dy = chomper.target.y - chomper.y;
+      } else if (chomper.mode === "hunt") {
+        const target = chomper.target;
+        if (!target) continue;
+        const dx = target.x - chomper.x;
+        const dy = target.y - chomper.y;
         const d = Math.hypot(dx, dy) || 1;
         const speedCap = clamp(125 + chomper.age * 110 + chomper.eaten * 45, 125, 900);
         const steer = 410 + chomper.age * 92 + chomper.eaten * 55;
@@ -4016,8 +4166,8 @@ function updateChompers(dt: number): void {
           chomper.vy = chomper.vy / speed * speedCap;
         }
 
-        if (d < chomper.r + chomper.target.r) {
-          const eaten = chomper.target;
+        if (d < chomper.r + target.r) {
+          const eaten = target;
           removeBall(eaten);
           chomper.target = null;
           chomper.eaten += 1;
@@ -4056,13 +4206,34 @@ function chomperHitsPaddle(chomper: Chomper): boolean {
 }
 
 function applyChomperPaddleBite(chomper: Chomper): void {
-  paddle.chomperBites.push(CHOMPER_PADDLE_BITE_DURATION);
+  if (state.chomperGuard > 0 || state.chomperRepel > 0) {
+    blockChomperBite(chomper);
+    return;
+  }
+
+  const guardTier = clampUpgradeTier(state.runUpgrades.guard);
+  const biteDuration = Math.max(12, CHOMPER_PADDLE_BITE_DURATION - guardTier * 1.4);
+  paddle.chomperBites.push(biteDuration);
   const stacks = activeChomperBiteStacks();
+  state.chomperCooldown = Math.max(state.chomperCooldown, 5 + stacks * 1.2);
   addShake(9);
   burst(chomper.x, chomper.y, 0xff3f3f, 34, 1);
   shockwave(paddle.x, paddle.y - 18, 0xff3f3f, 86 + stacks * 10);
   popText(paddle.x, paddle.y - 92, `CHOMPED x${stacks}`, 0xff3f3f);
   beep(92, 0.11, "sawtooth", 0.055);
+  sendChomperAway(chomper);
+}
+
+function blockChomperBite(chomper: Chomper): void {
+  if (state.chomperGuard > 0) state.chomperGuard -= 1;
+  state.chomperRepel = Math.max(state.chomperRepel, 2.8);
+  state.chomperCooldown = Math.max(state.chomperCooldown, 4.5);
+  repelChomperFromPaddle(chomper, 1.25);
+  addShake(5);
+  burst(chomper.x, chomper.y, powerupColor("repel"), 28, 0.9);
+  shockwave(paddle.x, paddle.y - 18, powerupColor("repel"), 104);
+  popText(paddle.x, paddle.y - 94, "BITE BLOCK", powerupColor("repel"));
+  beep(760, 0.07, "triangle", 0.04);
   sendChomperAway(chomper);
 }
 
@@ -4075,18 +4246,24 @@ function sendChomperAway(chomper: Chomper): void {
 }
 
 function maybeSpawnChomper(dt: number): void {
-  if (!state.launched || balls.length < 12 || chompers.length >= 3) return;
+  const biteStacks = activeChomperBiteStacks();
+  const maxActive = biteStacks > 0 || state.directorPanic > 0.68 ? 2 : 3;
+  if (!state.launched || balls.length < 12 || chompers.length >= maxActive || state.chomperRepel > 0 || biteStacks >= 2) return;
 
   state.chomperCooldown -= dt;
   if (state.chomperCooldown > 0) return;
 
   const pressure = ballPressureMultiplier();
-  const chance = pressure >= 3 ? 0.65 : pressure >= 2.5 ? 0.45 : pressure >= 2 ? 0.3 : 0.18;
-  const nextDelay = pressure >= 3 ? rand(4, 6) : pressure >= 2.5 ? rand(5.5, 8) : rand(7, 11);
+  const guardTier = clampUpgradeTier(state.runUpgrades.guard);
+  const relief = biteStacks > 0 || state.directorPanic > 0.55 ? 0.55 : 1;
+  const confidence = state.chomperGuard > 0 ? 1.08 : 1;
+  const chance = (pressure >= 3 ? 0.65 : pressure >= 2.5 ? 0.45 : pressure >= 2 ? 0.3 : 0.18) * relief * confidence;
+  const nextDelayBase = pressure >= 3 ? rand(4, 6) : pressure >= 2.5 ? rand(5.5, 8) : rand(7, 11);
+  const nextDelay = nextDelayBase + biteStacks * 3 + (state.directorPanic > 0.55 ? 2.2 : 0) - guardTier * 0.12;
   state.chomperCooldown = nextDelay;
   if (Math.random() > chance) return;
 
-  state.chomperWarningTimer = 0.5;
+  state.chomperWarningTimer = CHOMPER_SPAWN_WARNING_DURATION;
   state.chomperWarningSide = Math.random() < 0.5 ? -1 : 1;
   spawnChomper();
 }
@@ -4254,6 +4431,9 @@ function startGame(): void {
   state.goldRush = 0;
   state.autoLaser = 0;
   state.autoLaserClock = 0;
+  state.chomperRepel = 0;
+  state.chomperGuard = 0;
+  state.feverTime = 0;
   state.bankedPowerChoices = 0;
   state.pendingPowerChoices = 0;
   state.queuedPowerRewards.length = 0;
@@ -4291,7 +4471,10 @@ function clearLifeTransientObjects(): void {
   state.machineGunClock = 0;
   state.trainShots = 0;
   state.trainClock = 0;
+  state.chomperRepel = 0;
+  state.feverTime = 0;
   state.chomperCooldown = 9;
+  state.chomperGuard = maxChomperGuardCharges();
 }
 
 function handleBallDrain(): void {
@@ -4303,6 +4486,7 @@ function handleBallDrain(): void {
   state.pierce = 0;
   state.overcharge = 0;
   clearLifeTransientObjects();
+  paddle.chomperBites.length = 0;
 
   if (!wasLaunched) {
     makeBall(paddle.x, paddle.y - 54, -Math.PI / 2, 0, 16);
@@ -4339,6 +4523,9 @@ function endGame(): void {
   state.launchPowerQueue.length = 0;
   state.autoLaser = 0;
   state.autoLaserClock = 0;
+  state.chomperRepel = 0;
+  state.chomperGuard = 0;
+  state.feverTime = 0;
   clearLevelObjects(false);
   paddle.chomperBites.length = 0;
   pauseBtn.textContent = "Pause";
@@ -4572,6 +4759,13 @@ function renderPaddleZone(): void {
     .fill({ color: 0xffffff, alpha: 0.08 })
     .roundRect(paddle.x - zoneW / 2, paddle.y - paddle.h / 2 - 5, zoneW, paddle.h + 10, 8)
     .stroke({ width: 2, color: 0xfff26b, alpha: glow });
+
+  if (state.chomperGuard > 0 || state.chomperRepel > 0) {
+    const shieldAlpha = state.chomperRepel > 0 ? 0.34 + Math.sin(state.levelClock * 12) * 0.09 : 0.24;
+    paddleZoneGfx
+      .roundRect(paddle.x - paddle.w / 2 - 18, paddle.y - paddle.h / 2 - 18, paddle.w + 36, paddle.h + 36, 18)
+      .stroke({ width: state.chomperRepel > 0 ? 4 : 3, color: powerupColor("repel"), alpha: shieldAlpha });
+  }
 }
 
 function renderSlowField(): void {
@@ -4694,12 +4888,16 @@ function drawBrick(brick: Brick): void {
 
 function renderFlash(): void {
   flashGfx.clear();
-  if (state.feverPulse > 0) {
+  const feverAlpha = Math.max(
+    state.feverPulse,
+    state.feverTime > 0 ? 0.28 + Math.sin(state.levelClock * 8) * 0.08 : 0
+  );
+  if (feverAlpha > 0) {
     flashGfx
       .rect(8, 8, WORLD_W - 16, WORLD_H - 16)
-      .stroke({ width: 5, color: currentLevel().tint, alpha: state.feverPulse * 0.32 })
+      .stroke({ width: 5, color: currentLevel().tint, alpha: feverAlpha * 0.32 })
       .rect(0, 0, WORLD_W, WORLD_H)
-      .fill({ color: currentLevel().tint, alpha: state.feverPulse * 0.035 });
+      .fill({ color: currentLevel().tint, alpha: feverAlpha * 0.035 });
   }
   if (state.flash > 0) {
     flashGfx.rect(0, 0, WORLD_W, WORLD_H).fill({ color: 0xffffff, alpha: state.flash * 0.55 });
@@ -4958,6 +5156,7 @@ function renderEffectStrip(): void {
   effectStripGfx.clear();
   effectStripLayer.removeChildren();
   const effects: Array<{ label: string; color: number; remaining: number; max: number }> = [];
+  if (state.feverTime > 0) effects.push({ label: "FEVER", color: currentLevel().tint, remaining: state.feverTime, max: 10 + clampUpgradeTier(state.runUpgrades.fever) * 0.75 });
   if (state.pierce > 0) effects.push({ label: "PHASE", color: 0xb891ff, remaining: state.pierce, max: 9 });
   if (state.timeWarp > 0) effects.push({ label: "TIME", color: 0x83f7ff, remaining: state.timeWarp, max: 15 });
   if (state.goldRush > 0) effects.push({ label: "GOLD", color: 0xffc83d, remaining: state.goldRush, max: 14 });
@@ -4967,6 +5166,8 @@ function renderEffectStrip(): void {
   if (state.slowField > 0) effects.push({ label: "SLOW", color: 0x58e7ff, remaining: state.slowField, max: 7 });
   if (paddle.widen > 0) effects.push({ label: "WIDE", color: 0x13dbff, remaining: paddle.widen, max: 20 });
   if (paddle.shrink > 0) effects.push({ label: "TIGHT", color: 0xff4f78, remaining: paddle.shrink, max: 20 });
+  if (state.chomperRepel > 0) effects.push({ label: "REPEL", color: powerupColor("repel"), remaining: state.chomperRepel, max: CHOMPER_REPEL_DURATION + clampUpgradeTier(state.runUpgrades.guard) * 0.75 });
+  if (state.chomperGuard > 0) effects.push({ label: `GUARD ${state.chomperGuard}`, color: powerupColor("repel"), remaining: 1, max: 1 });
   if (activeChomperBiteStacks() > 0) {
     effects.push({
       label: `CHOMP x${activeChomperBiteStacks()}`,
@@ -5005,15 +5206,43 @@ function renderEffectStrip(): void {
 
 function renderChomperWarning(): void {
   chomperWarningGfx.clear();
-  if (state.chomperWarningTimer <= 0) return;
-  const a = clamp(state.chomperWarningTimer / 0.5, 0, 1);
-  const side = state.chomperWarningSide;
-  const x = side < 0 ? WALL + 20 : WORLD_W - WALL - 20;
-  chomperWarningGfx
-    .circle(x, WORLD_H * 0.3, 18 + (1 - a) * 12)
-    .fill({ color: 0xffd84a, alpha: a * 0.4 })
-    .circle(x, WORLD_H * 0.3, 10)
-    .fill({ color: 0xffd84a, alpha: a * 0.8 });
+  if (state.chomperWarningTimer > 0) {
+    const a = clamp(state.chomperWarningTimer / CHOMPER_SPAWN_WARNING_DURATION, 0, 1);
+    const side = state.chomperWarningSide;
+    const x = side < 0 ? WALL + 20 : WORLD_W - WALL - 20;
+    chomperWarningGfx
+      .circle(x, WORLD_H * 0.3, 18 + (1 - a) * 16)
+      .fill({ color: 0xffd84a, alpha: a * 0.4 })
+      .circle(x, WORLD_H * 0.3, 10)
+      .fill({ color: 0xffd84a, alpha: a * 0.8 })
+      .moveTo(x, WORLD_H * 0.3)
+      .lineTo(side < 0 ? WALL + 120 : WORLD_W - WALL - 120, WORLD_H * 0.3)
+      .stroke({ width: 3, color: 0xffd84a, alpha: a * 0.42 });
+  }
+
+  for (const chomper of chompers) {
+    if (chomper.mode !== "hunt") continue;
+    const target = chomper.target;
+    const danger = chomper.y > paddle.y - 330 || Math.abs(chomper.x - paddle.x) < paddle.w / 2 + 180;
+    const pulse = 0.55 + Math.sin(state.levelClock * 12 + chomper.age) * 0.18;
+    if (target) {
+      chomperWarningGfx
+        .moveTo(chomper.x, chomper.y)
+        .lineTo(target.x, target.y)
+        .stroke({ width: danger ? 3 : 2, color: danger ? 0xff3f3f : 0xffd84a, alpha: danger ? 0.38 * pulse : 0.22 })
+        .circle(target.x, target.y, target.r + 10)
+        .stroke({ width: 2, color: 0xffd84a, alpha: danger ? 0.32 : 0.18 });
+    }
+
+    if (danger) {
+      chomperWarningGfx
+        .moveTo(chomper.x, chomper.y)
+        .lineTo(paddle.x, paddle.y)
+        .stroke({ width: 4, color: 0xff3f3f, alpha: 0.2 * pulse })
+        .roundRect(paddle.x - paddle.w / 2 - 14, paddle.y - paddle.h / 2 - 12, paddle.w + 28, paddle.h + 24, 10)
+        .stroke({ width: 3, color: 0xff3f3f, alpha: 0.28 * pulse });
+    }
+  }
 }
 
 function renderPauseUpgrades(): void {
