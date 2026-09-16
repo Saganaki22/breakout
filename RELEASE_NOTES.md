@@ -1,3 +1,9 @@
+# v0.1.3 — Mobile layout follow-up
+
+- Keep start and upgrade menus scrollable on narrow screens.
+- Keep controls reachable on short screens and fix oversized mobile HUD meters.
+- Includes all gameplay improvements from v0.1.2 below.
+
 # v0.1.2 — Better control, fairer combos, more replay value
 
 - Fix keyboard steering fighting the mouse position; support uppercase A/D.
