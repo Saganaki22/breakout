@@ -18,8 +18,8 @@
   <meta name="twitter:image" content="https://drbaph.is-a.dev/breakout/og-image.svg">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="apple-touch-icon.svg">
-  <script type="module" crossorigin src="./assets/index--1wblMCW.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-DJ9I3O5J.css">
+  <script type="module" crossorigin src="./assets/index-CfSuU8Fo.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Diz1Elro.css">
 </head>
 <body>
   <main class="game-shell">
@@ -27,6 +27,7 @@
       <div class="score-card">
         <span>Score</span>
         <strong id="score">0</strong>
+        <small id="bestScore">BEST 0</small>
       </div>
     </section>
 
@@ -68,12 +69,14 @@
       <div id="overlay" class="overlay">
         <h1>Breakout</h1>
         <p>Break bricks, chain multipliers, split balls, and survive shifting themed ages.</p>
+        <small class="how-to">Mouse / touch / A D / arrow keys to move · Space to launch · P / Esc to pause<br>Catch powerups. Hit the paddle centre for combos. Earn an extra life every 50,000 points.</small>
         <div id="choicePanel" class="choice-panel" hidden></div>
         <button id="startBtn" type="button">Start</button>
       </div>
     </div>
 
     <section class="controls" aria-label="Game controls">
+      <span id="playHint" class="play-hint" aria-live="polite"></span>
       <button id="pauseBtn" type="button">Pause</button>
       <button id="launchBtn" type="button">Launch</button>
       <button id="muteBtn" type="button">Sound On</button>
