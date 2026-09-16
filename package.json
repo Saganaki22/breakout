@@ -1,12 +1,13 @@
 {
   "name": "neon-cascade-pixi",
-  "version": "1.0.0",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.18.1"

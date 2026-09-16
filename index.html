@@ -26,6 +26,7 @@
       <div class="score-card">
         <span>Score</span>
         <strong id="score">0</strong>
+        <small id="bestScore">BEST 0</small>
       </div>
     </section>
 
@@ -67,12 +68,14 @@
       <div id="overlay" class="overlay">
         <h1>Breakout</h1>
         <p>Break bricks, chain multipliers, split balls, and survive shifting themed ages.</p>
+        <small class="how-to">Mouse / touch / A D / arrow keys to move · Space to launch · P / Esc to pause<br>Catch powerups. Hit the paddle centre for combos. Earn an extra life every 50,000 points.</small>
         <div id="choicePanel" class="choice-panel" hidden></div>
         <button id="startBtn" type="button">Start</button>
       </div>
     </div>
 
     <section class="controls" aria-label="Game controls">
+      <span id="playHint" class="play-hint" aria-live="polite"></span>
       <button id="pauseBtn" type="button">Pause</button>
       <button id="launchBtn" type="button">Launch</button>
       <button id="muteBtn" type="button">Sound On</button>

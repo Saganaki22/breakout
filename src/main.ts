@@ -1,3 +1,4 @@
+import { decayCombo, keyboardTarget, readBestScore } from "./gameplay";
 import {
   Application,
   Assets,
@@ -526,6 +527,9 @@ const state = {
   launched: false,
   muted: false,
   score: 0,
+  bestScore: (() => { try { return readBestScore(localStorage); } catch { return 0; } })(),
+  nextExtraLife: 50000,
+  inputMode: "pointer" as "pointer" | "keyboard",
   combo: 1,
   comboClock: 0,
   lastComboSting: 0,
@@ -1961,6 +1965,18 @@ function updateDynamicBrickDifficulty(force: boolean): void {
 function update(dt: number): void {
   if (!state.running || state.paused) return;
 
+  if (!state.launched) {
+    state.shake = Math.max(0, state.shake - 52 * dt);
+    state.flash = Math.max(0, state.flash - dt);
+    updateParticles(dt);
+    updateJuice(dt);
+    removeDeadObjects();
+    movePaddle(dt);
+    const ball = balls[0];
+    if (ball) { ball.x = paddle.x; ball.y = paddle.y - 54; }
+    updateHud();
+    return;
+  }
   const level = currentLevel();
   state.levelClock += dt;
   state.levelAge += dt;
@@ -1981,10 +1997,9 @@ function update(dt: number): void {
   state.chomperRepel = Math.max(0, state.chomperRepel - dt);
   state.feverTime = Math.max(0, state.feverTime - dt);
   paddle.cooldown = Math.max(0, paddle.cooldown - dt);
-  state.comboClock -= state.feverTime > 0 ? dt * 0.58 : dt;
-  if (state.comboClock <= 0 && state.combo > 1) {
-    state.combo = Math.max(1, state.combo - Math.ceil(dt * (state.feverTime > 0 ? 7 : 16)));
-  }
+  const decay = decayCombo(state.combo, state.comboClock, dt, state.feverTime > 0);
+  state.combo = decay.combo;
+  state.comboClock = decay.clock;
 
   movePaddle(dt);
   updateMachineGun(dt);
@@ -2036,12 +2051,15 @@ function update(dt: number): void {
 }
 
 function movePaddle(dt: number): void {
-  if (state.keys.has("ArrowLeft") || state.keys.has("a")) paddle.speed -= 3900 * dt;
-  if (state.keys.has("ArrowRight") || state.keys.has("d")) paddle.speed += 3900 * dt;
-
-  paddle.x += (state.pointerX - paddle.x) * Math.min(1, dt * 13);
-  paddle.x += paddle.speed * dt;
-  paddle.speed *= Math.pow(0.025, dt);
+  const previousX = paddle.x;
+  if (state.inputMode === "keyboard") {
+    const direction = Number(state.keys.has("arrowright") || state.keys.has("d"))
+      - Number(state.keys.has("arrowleft") || state.keys.has("a"));
+    state.pointerX = keyboardTarget(state.pointerX, direction, dt,
+      WALL + paddle.w / 2 + 12, WORLD_W - WALL - paddle.w / 2 - 12);
+  }
+  paddle.x += (state.pointerX - paddle.x) * Math.min(1, dt * 20);
+  paddle.speed = (paddle.x - previousX) / dt;
   paddle.widen = Math.max(0, paddle.widen - dt);
   paddle.shrink = Math.max(0, paddle.shrink - dt);
   for (let i = paddle.chomperBites.length - 1; i >= 0; i -= 1) {
@@ -4423,6 +4441,8 @@ function startGame(): void {
   state.running = true;
   state.paused = false;
   state.score = 0;
+  state.nextExtraLife = 50000;
+  state.keys.clear();
   state.bestComboRun = 1;
   state.maxBallsRun = 0;
   state.lastComboSting = 0;
@@ -4552,7 +4572,8 @@ function endGame(): void {
   const title = overlay.querySelector("h1");
   const copy = overlay.querySelector("p");
   if (title) title.textContent = "Game Over";
-  if (copy) copy.textContent = `Final score: ${Math.floor(state.score).toLocaleString()}.`;
+  saveBestScore();
+  if (copy) copy.textContent = `Score ${Math.floor(state.score).toLocaleString()} · Best ${state.bestScore.toLocaleString()} · Age ${state.level} · Peak combo ×${state.bestComboRun} · ${state.perfectHits} perfect hits. Beat your best on the next run!`;
   choicePanel.hidden = true;
   startBtn.textContent = "Restart";
   startBtn.hidden = false;
@@ -4568,6 +4589,7 @@ function togglePause(): void {
     root.position.set(0, 0);
   }
   pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+  updateHud();
 }
 
 function updateParticles(dt: number): void {
@@ -5092,7 +5114,30 @@ function objectiveShortLabel(objective: ObjectiveState): string {
   return "Perfect";
 }
 
+function saveBestScore(): void {
+  if (state.score <= state.bestScore) return;
+  state.bestScore = Math.floor(state.score);
+  try { localStorage.setItem("breakout.best", String(state.bestScore)); } catch { /* Storage is optional. */ }
+}
+
 function updateHud(): void {
+  while (state.running && state.score >= state.nextExtraLife) {
+    state.nextExtraLife += 50000;
+    if (state.lives < 5) {
+      state.lives += 1;
+      popText(paddle.x, paddle.y - 100, "EXTRA LIFE!", 0x73ffb6);
+      beep(880, 0.12, "triangle", 0.05);
+    }
+  }
+  const best = document.getElementById("bestScore");
+  if (best) best.textContent = `BEST ${Math.max(state.bestScore, Math.floor(state.score)).toLocaleString()}`;
+  const hint = document.getElementById("playHint");
+  if (hint) hint.textContent = !state.running ? "Aim for the centre of the paddle for PERFECT hits"
+    : state.paused ? "Paused · P or Esc to resume"
+    : !state.launched ? "Move to aim · Click, tap or Space to launch"
+    : `Next extra life at ${state.nextExtraLife.toLocaleString()} · Centre hits build your combo`;
+  launchBtn.disabled = !state.running || state.paused || state.launched;
+  pauseBtn.disabled = !state.running || state.waitingChoice;
   scoreEl.textContent = Math.floor(state.score).toLocaleString();
   comboEl.textContent = `x${state.combo}`;
   comboFillEl.style.transform = `scaleX(${state.combo > 1 ? clamp(state.comboClock / 1.85, 0, 1) : 0})`;
@@ -5283,7 +5328,7 @@ function renderChomperWarning(): void {
 
 function renderPauseUpgrades(): void {
   pauseUpgradeGfx.clear();
-  pauseUpgradeLayer.removeChildren();
+  for (const child of pauseUpgradeLayer.removeChildren()) child.destroy();
   if (!state.running || !state.paused || state.waitingChoice) return;
   const upgrades = (Object.entries(state.runUpgrades) as [UpgradeId, number][])
     .filter(([, tier]) => tier > 0);
@@ -5366,27 +5411,39 @@ function resizeRenderer(): void {
 }
 
 canvas.addEventListener("pointermove", (event) => {
+  state.inputMode = "pointer";
   state.pointerX = pointerToWorld(event);
 });
 
 canvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
+  canvas.setPointerCapture(event.pointerId);
+  state.inputMode = "pointer";
   state.pointerX = pointerToWorld(event);
   if (state.running) launch();
 });
 
 window.addEventListener("keydown", (event) => {
-  state.keys.add(event.key);
-  if (event.key === " ") {
-    event.preventDefault();
-    launch();
+  const key = event.key.toLowerCase();
+  if (event.target instanceof HTMLButtonElement && (key === " " || key === "enter")) return;
+  if (["arrowleft", "arrowright", "a", "d", " "].includes(key)) event.preventDefault();
+  state.keys.add(key);
+  if (["arrowleft", "arrowright", "a", "d"].includes(key)) {
+    if (state.inputMode !== "keyboard") state.pointerX = paddle.x;
+    state.inputMode = "keyboard";
   }
-  if (event.key.toLowerCase() === "p") togglePause();
+  if (event.repeat) return;
+  if (key === " ") launch();
+  if (key === "p" || key === "escape") togglePause();
 });
-
-window.addEventListener("keyup", (event) => {
-  state.keys.delete(event.key);
-});
+window.addEventListener("keyup", (event) => state.keys.delete(event.key.toLowerCase()));
+function pauseOnLeave(): void {
+  state.keys.clear();
+  saveBestScore();
+  if (state.running && !state.paused && !state.waitingChoice) togglePause();
+}
+window.addEventListener("blur", pauseOnLeave);
+document.addEventListener("visibilitychange", () => { if (document.hidden) pauseOnLeave(); });
 
 window.addEventListener("resize", () => {
   resizeRenderer();

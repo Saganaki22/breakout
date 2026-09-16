@@ -2,3 +2,5 @@ node_modules/
 dist/
 vite-dev.log
 .claude/
+
+.npm-cache/
